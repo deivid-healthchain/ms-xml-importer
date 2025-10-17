@@ -1,0 +1,553 @@
+// Schema Prisma Global - Lazarus Microservices
+// Este schema unifica todos os modelos de todos os microsserviços
+// Todos os MS apontam para a mesma base de dados
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS GLOBAIS
+// ============================================================================
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum PatientStatus {
+  ACTIVE
+  INACTIVE
+  DISCHARGED
+  TRANSFERRED
+}
+
+enum ValidationStatus {
+  PENDING
+  VALIDATED
+  REJECTED
+}
+
+enum AccommodationType {
+  STANDARD
+  PREMIUM
+  VIP
+  ICU
+}
+
+enum AccommodationStatus {
+  OCCUPIED
+  AVAILABLE
+  MAINTENANCE
+  RESERVED
+}
+
+enum ProcedureStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum BillingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
+
+enum AuditLogAction {
+  CREATE
+  UPDATE
+  DELETE
+  VIEW
+  APPROVE
+  REJECT
+}
+
+enum AuditLogEntity {
+  PATIENT
+  PROCEDURE
+  BILLING
+  DOCUMENT
+  USER
+}
+
+enum DocumentCategory {
+  MEDICAL_RECORD
+  INSURANCE
+  IDENTIFICATION
+  PROCEDURE_REPORT
+  BILLING_DOCUMENT
+  OTHER
+}
+
+enum BusinessRuleType {
+  VALIDATION
+  CALCULATION
+  WORKFLOW
+  NOTIFICATION
+}
+
+enum RuleStatus {
+  ACTIVE
+  INACTIVE
+  DRAFT
+}
+
+// ============================================================================
+// MODELO PRINCIPAL - PATIENT
+// ============================================================================
+
+model Patient {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  // Identificação
+  fullName  String
+  cpf       String   @unique
+  rg        String
+  birthDate DateTime
+  gender    Gender
+
+  // Contato
+  phone   String
+  email   String
+  address String
+
+  // Atendimento
+  medicalRecordNumber String   @unique
+  admissionDate       DateTime
+  roomNumber          String
+  responsibleDoctor   String
+  insurancePlan       String
+
+  // Plano de Saúde
+  insuranceNumber       String
+  insuranceValidity     DateTime
+  accommodationType     AccommodationType
+  currentAccommodation  AccommodationType
+  accommodationStatus   AccommodationStatus
+  observations          String?
+
+  // Status
+  status           PatientStatus
+  validationStatus ValidationStatus
+
+  // Relacionamentos
+  procedures      Procedure[]
+  billingItems    BillingItem[]
+  billingAccounts BillingAccount[]
+  auditLogs       AuditLog[]
+  documents       Document[]
+  dialogues       Dialogue[]
+
+  // Índices
+  @@index([cpf])
+  @@index([medicalRecordNumber])
+  @@index([roomNumber])
+  @@index([status])
+  @@index([validationStatus])
+  @@map("patients")
+}
+
+// ============================================================================
+// PROCEDURES (MS-PROCEDURES)
+// ============================================================================
+
+model Procedure {
+  id                    String            @id @default(cuid())
+  code                  String            @unique
+  name                  String
+  description           String?
+  category              String
+  subcategory           String?
+  complexity            String
+  estimatedDuration     Int               // em minutos
+  basePrice             Decimal           @db.Decimal(10, 2)
+  
+  // Status e controle
+  status                ProcedureStatus
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  
+  // Relacionamentos
+  patientId             String?
+  patient               Patient?          @relation(fields: [patientId], references: [id])
+  billingItems          BillingItem[]
+  auditLogs             AuditLog[]
+  
+  // Metadados
+  requiresAuthorization Boolean           @default(false)
+  isActive              Boolean           @default(true)
+  tags                  String[]
+  
+  @@index([code])
+  @@index([category])
+  @@index([status])
+  @@index([patientId])
+  @@map("procedures")
+}
+
+// ============================================================================
+// BILLING (MS-BILLING)
+// ============================================================================
+
+model BillingAccount {
+  id                    String              @id @default(cuid())
+  patientId             String
+  patient               Patient             @relation(fields: [patientId], references: [id])
+  
+  // Informações da conta
+  accountNumber         String              @unique
+  totalAmount           Decimal             @db.Decimal(10, 2)
+  paidAmount            Decimal             @db.Decimal(10, 2) @default(0)
+  remainingAmount       Decimal             @db.Decimal(10, 2)
+  
+  // Status e datas
+  status                BillingStatus
+  dueDate               DateTime
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  
+  // Relacionamentos
+  billingItems          BillingItem[]
+  auditLogs             AuditLog[]
+  
+  @@index([patientId])
+  @@index([accountNumber])
+  @@index([status])
+  @@map("billing_accounts")
+}
+
+model BillingItem {
+  id                    String              @id @default(cuid())
+  billingAccountId      String
+  billingAccount        BillingAccount      @relation(fields: [billingAccountId], references: [id])
+  
+  patientId             String
+  patient               Patient             @relation(fields: [patientId], references: [id])
+  
+  procedureId           String?
+  procedure             Procedure?          @relation(fields: [procedureId], references: [id])
+  
+  // Detalhes do item
+  description           String
+  quantity              Int                 @default(1)
+  unitPrice             Decimal             @db.Decimal(10, 2)
+  totalPrice            Decimal             @db.Decimal(10, 2)
+  discount              Decimal             @db.Decimal(10, 2) @default(0)
+  
+  // Status e controle
+  status                BillingStatus
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  
+  @@index([billingAccountId])
+  @@index([patientId])
+  @@index([procedureId])
+  @@map("billing_items")
+}
+
+// ============================================================================
+// AUDIT (MS-AUDIT)
+// ============================================================================
+
+model AuditLog {
+  id          String         @id @default(cuid())
+  createdAt   DateTime       @default(now())
+  
+  // Ação auditada
+  action      AuditLogAction
+  entity      AuditLogEntity
+  entityId    String
+  
+  // Usuário responsável
+  userId      String
+  userName    String
+  userRole    String
+  
+  // Detalhes da mudança
+  oldValues   Json?
+  newValues   Json?
+  changes     Json?
+  
+  // Contexto
+  ipAddress   String?
+  userAgent   String?
+  sessionId   String?
+  
+  // Relacionamentos opcionais
+  patientId   String?
+  patient     Patient?       @relation(fields: [patientId], references: [id])
+  
+  procedureId String?
+  procedure   Procedure?     @relation(fields: [procedureId], references: [id])
+  
+  billingAccountId String?
+  billingAccount   BillingAccount? @relation(fields: [billingAccountId], references: [id])
+  
+  @@index([action])
+  @@index([entity])
+  @@index([entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([patientId])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// DOCUMENTS (MS-RAG-BASE)
+// ============================================================================
+
+model Document {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Identificação
+  title       String
+  filename    String
+  originalName String
+  mimeType    String
+  size        Int
+
+  // Categorização
+  category    DocumentCategory
+  subcategory String?
+  tags        String[]
+
+  // Conteúdo
+  content     String?
+  summary     String?
+  
+  // Relacionamentos
+  patientId   String?
+  patient     Patient? @relation(fields: [patientId], references: [id])
+  
+  // Metadados
+  isProcessed Boolean  @default(false)
+  isPublic    Boolean  @default(false)
+  
+  @@index([category])
+  @@index([patientId])
+  @@index([createdAt])
+  @@map("documents")
+}
+
+// ============================================================================
+// BUSINESS RULES (MS-RULES-ENGINE)
+// ============================================================================
+
+model BusinessRule {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Identificação
+  name        String
+  description String?
+  code        String   @unique
+  
+  // Configuração
+  type        BusinessRuleType
+  status      RuleStatus
+  priority    Int      @default(0)
+  
+  // Lógica da regra
+  conditions  Json     // Condições em formato JSON
+  actions     Json     // Ações em formato JSON
+  
+  // Metadados
+  version     String   @default("1.0")
+  isActive    Boolean  @default(true)
+  tags        String[]
+  
+  @@index([code])
+  @@index([type])
+  @@index([status])
+  @@index([isActive])
+  @@map("business_rules")
+}
+
+// ============================================================================
+// DIALOGUE ENGINE (MS-DIALOGUE-ENGINE)
+// ============================================================================
+
+model Dialogue {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relacionamento
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id])
+  
+  // Conteúdo do diálogo
+  title       String
+  content     String
+  type        String   // chat, voice, video, etc.
+  
+  // Status
+  isActive    Boolean  @default(true)
+  isResolved  Boolean  @default(false)
+  
+  // Metadados
+  metadata    Json?
+  tags        String[]
+  
+  @@index([patientId])
+  @@index([type])
+  @@index([isActive])
+  @@map("dialogues")
+}
+
+// ============================================================================
+// AI AGENTS (MS-AI-AGENT)
+// ============================================================================
+
+model AIAgent {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Identificação
+  name        String
+  description String?
+  type        String   // assistant, analyzer, validator, etc.
+  
+  // Configuração
+  config      Json     // Configurações específicas do agente
+  model       String   // Modelo de IA utilizado
+  version     String   @default("1.0")
+  
+  // Status
+  isActive    Boolean  @default(true)
+  isTraining  Boolean  @default(false)
+  
+  // Metadados
+  tags        String[]
+  
+  @@index([type])
+  @@index([isActive])
+  @@map("ai_agents")
+}
+
+// ============================================================================
+// HOSPITAL INTEGRATION (MS-HOSPITAL-INTEGRATION)
+// ============================================================================
+
+model HospitalSystem {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Identificação
+  name        String
+  code        String   @unique
+  description String?
+  
+  // Configuração de integração
+  endpoint    String
+  apiKey      String?
+  config      Json     // Configurações específicas
+  
+  // Status
+  isActive    Boolean  @default(true)
+  isConnected Boolean  @default(false)
+  lastSync    DateTime?
+  
+  // Metadados
+  version     String   @default("1.0")
+  tags        String[]
+  
+  @@index([code])
+  @@index([isActive])
+  @@map("hospital_systems")
+}
+
+
+// ============================================================================
+// FRON INTEGRATION (MS-TISS-IMPORTER)
+// ============================================================================
+
+model Guia {
+  id                                Int @id @default(autoincrement())
+  numeroGuiaPrestador               String    @unique
+  numeroGuiaOperadora               String?
+  numeroCarteira                    String?
+  senha                             String?
+  dataAutorizacao                   DateTime?
+  dataValidadeSenha                 DateTime?
+  atendimentoRN                     String?
+  tipoTransacao                     String?
+  loteGuia                          String?
+  
+  // Dados da Internação
+  caraterAtendimento                String?
+  tipoFaturamento                   String?
+  dataInicioFaturamento             DateTime?
+  dataFinalFaturamento              DateTime?
+  tipoInternacao                    String?
+  regimeInternacao                  String?
+  
+  // Dados de Saída
+  diagnostico                       String?
+  indicadorAcidente                 String?
+  motivoEncerramento                String?
+
+  // Listas de Itens 
+  procedimentos                     Procedimento[] 
+  outrasDespesas                    Json?
+  
+  // Valores Totais
+  valorTotalProcedimentos           Float?
+  valorTotalDiarias                 Float?
+  valorTotalTaxasAlugueis           Float?
+  valorTotalMateriais               Float?
+  valorTotalMedicamentos            Float?
+  valorTotalOPME                    Float?
+  valorTotalGasesMedicinais         Float?
+  valorTotalGeral                   Float?
+
+  observacao                        String?   @db.Text
+  
+  createdAt                         DateTime  @default(now())
+  updatedAt                         DateTime  @updatedAt
+  @@map("guia")
+}
+
+model Procedimento {
+  id                      Int @id @default(autoincrement())
+  sequencialItem          String
+  dataExecucao            String?
+  horaInicial             String?
+  horaFinal               String?
+  codigoTabela            String?
+  codigoProcedimento      String?
+  descricaoProcedimento   String?   @db.Text
+  quantidadeExecutada     Int?
+  viaAcesso               String?
+  tecnicaUtilizada        String?
+  reducaoAcrescimo        Float?
+  valorUnitario           Float?
+  valorTotal              Float?
+  nomeProfissional        String?
+  identEquipe             Json?
+
+  guiaId                  Int
+  guia                    Guia @relation(fields: [guiaId], references: [id], onDelete: Cascade)
+
+  @@unique([guiaId, sequencialItem])
+  @@map("guia_procedimentos")
+}
+

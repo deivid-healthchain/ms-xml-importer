@@ -1,0 +1,291 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model audit_logs {
+  id               String            @id
+  createdAt        DateTime          @default(now())
+  entityType       EntityType
+  entityId         String
+  action           AuditAction
+  description      String
+  userId           String
+  userName         String
+  userRole         String
+  oldData          Json?
+  newData          Json?
+  changes          Json?
+  ipAddress        String
+  userAgent        String
+  sessionId        String
+  validationStatus ValidationStatus?
+  justification    String?
+  metadata         Json?
+  patientId        String?
+  procedureId      String?
+  billingId        String?
+  billing_items    billing_items?    @relation(fields: [billingId], references: [id])
+  patients         patients?         @relation(fields: [patientId], references: [id])
+  procedures       procedures?       @relation(fields: [procedureId], references: [id])
+
+  @@index([action])
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([validationStatus])
+}
+
+model billing_items {
+  id               String           @id
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime
+  deletedAt        DateTime?
+  patientId        String
+  procedureId      String?
+  code             String
+  description      String
+  category         BillingCategory
+  unitPrice        Decimal          @db.Decimal(10, 2)
+  quantity         Int
+  totalPrice       Decimal          @db.Decimal(10, 2)
+  port             Int?
+  coverageType     CoverageType
+  riskLevel        RiskLevel
+  requesterId      String
+  requesterName    String
+  requestDate      DateTime
+  status           BillingStatus
+  validationStatus ValidationStatus
+  auditNotes       String?
+  rejectionReason  String?
+  audit_logs       audit_logs[]
+  patients         patients         @relation(fields: [patientId], references: [id])
+  procedures       procedures?      @relation(fields: [procedureId], references: [id])
+
+  @@index([category])
+  @@index([code])
+  @@index([patientId])
+  @@index([procedureId])
+  @@index([requestDate])
+  @@index([status])
+  @@index([validationStatus])
+}
+
+model documents {
+  id             String           @id
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime
+  deletedAt      DateTime?
+  patientId      String
+  filename       String
+  originalName   String
+  mimeType       String
+  size           Int
+  category       DocumentCategory
+  description    String?
+  blobUrl        String
+  containerName  String
+  blobName       String
+  uploadedBy     String
+  uploadedByName String
+  metadata       Json?
+  patients       patients         @relation(fields: [patientId], references: [id])
+
+  @@index([category])
+  @@index([createdAt])
+  @@index([patientId])
+}
+
+model patients {
+  id                   String              @id
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime
+  deletedAt            DateTime?
+  fullName             String
+  cpf                  String              @unique
+  rg                   String
+  birthDate            DateTime
+  gender               Gender
+  phone                String
+  email                String
+  address              String
+  medicalRecordNumber  String              @unique
+  admissionDate        DateTime
+  roomNumber           String
+  responsibleDoctor    String
+  insurancePlan        String
+  insuranceNumber      String
+  insuranceValidity    DateTime
+  accommodationType    AccommodationType
+  currentAccommodation AccommodationType
+  accommodationStatus  AccommodationStatus
+  observations         String?
+  status               PatientStatus
+  validationStatus     ValidationStatus
+  audit_logs           audit_logs[]
+  billing_items        billing_items[]
+  documents            documents[]
+  procedures           procedures[]
+
+  @@index([admissionDate])
+  @@index([cpf])
+  @@index([insurancePlan])
+  @@index([medicalRecordNumber])
+  @@index([responsibleDoctor])
+  @@index([roomNumber])
+  @@index([status])
+  @@index([validationStatus])
+}
+
+model procedures {
+  id                String           @id
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime
+  deletedAt         DateTime?
+  code              String
+  description       String
+  patientId         String
+  suggestedPort     Int
+  currentPort       Int
+  portDivergence    Boolean          @default(false)
+  status            ProcedureStatus
+  validationStatus  ValidationStatus
+  riskLevel         RiskLevel
+  lastAuditDate     DateTime?
+  auditorId         String?
+  auditNotes        String?
+  scheduledDate     DateTime?
+  completedDate     DateTime?
+  estimatedDuration Int?
+  actualDuration    Int?
+  audit_logs        audit_logs[]
+  billing_items     billing_items[]
+  patients          patients         @relation(fields: [patientId], references: [id])
+
+  @@index([code])
+  @@index([patientId])
+  @@index([portDivergence])
+  @@index([riskLevel])
+  @@index([scheduledDate])
+  @@index([status])
+  @@index([validationStatus])
+}
+
+model procedimentosExecutados {
+  id                    Int       @id @default(autoincrement())
+  patientId             String?   @map("patientid")
+  procedureId           String?   @map("procedureid")
+  loteGuia              String   @map("loteguia")
+  tipoTransacao        String   @map("tipotransacao")
+  numeroGuiaPrestador  String   @map("numeroguiaprestador")
+  numeroCarteira       String   @map("numerocarteira")
+  dataExecucao         DateTime? @map("dataexecucao")
+  codigoProcedimento   String   @map("codigoprocedimento")
+  descricaoProcedimento String  @map("descricaoprocedimento")
+  quantidade           Int      @map("quantidade")
+  valorUnitario        Float    @map("valorunitario")
+  valorTotal           Float    @map("valortotal")
+  nomeProfissional     String   @map("nomeprofissional")
+
+  @@index([patientId])
+  @@index([procedureId])
+  @@index([dataExecucao])
+}
+
+
+enum AccommodationStatus {
+  CORRECT
+  INCORRECT
+}
+
+enum AccommodationType {
+  APARTMENT
+  SHARED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  VIEW
+  APPROVE
+  REJECT
+}
+
+enum BillingCategory {
+  PROCEDURE
+  MATERIAL
+  MEDICATION
+  EXAM
+  ACCOMMODATION
+  OTHER
+}
+
+enum BillingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  BILLED
+}
+
+enum CoverageType {
+  INCLUDED
+  EXTRA
+  BLOCKED
+}
+
+enum DocumentCategory {
+  EXAM
+  PRESCRIPTION
+  REPORT
+  IMAGE
+  OTHER
+}
+
+enum EntityType {
+  PATIENT
+  PROCEDURE
+  BILLING
+  MATERIAL
+  USER
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum PatientStatus {
+  ACTIVE
+  INACTIVE
+  TRANSFERRED
+  DISCHARGED
+}
+
+enum ProcedureStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  PENDING_APPROVAL
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ValidationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  UNDER_REVIEW
+}
