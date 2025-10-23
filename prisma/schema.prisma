@@ -492,6 +492,9 @@ model Guia {
   tipoTransacao                     String?
   loteGuia                          String?
   
+  // Relacionamento com Paciente
+  patientId                         String?
+  
   // Dados da Internação
   caraterAtendimento                String?
   tipoFaturamento                   String?
