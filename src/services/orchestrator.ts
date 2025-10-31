@@ -89,7 +89,7 @@ class Orchestrator {
    */
   private async rollbackProcedures(procedureIds: string[]): Promise<void> {
     console.log(`🔄 Rollback: Deletando ${procedureIds.length} procedimentos...`);
-    
+
     for (const procedureId of procedureIds) {
       try {
         await proceduresClient.delete(procedureId);
@@ -158,8 +158,27 @@ class Orchestrator {
 
           try {
             const newPatient = await patientsClient.createFromXml({
-              numeroCarteira: guiaData.numeroCarteira,
-              nomeBeneficiario: guiaData.nomeBeneficiario,
+              numeroCarteira: guiaData.numeroCarteira
+              /*nomeBeneficiario: guiaData.nomeBeneficiario,
+              // Campos obrigatórios com valores padrão
+              cpf: 'PENDENTE',
+              rg: 'PENDENTE',
+              birthDate: new Date(),
+              gender: 'OTHER',
+              phone: 'PENDENTE',
+              email: 'pendente@temp.com',
+              address: 'PENDENTE',
+              medicalRecordNumber: `TEMP-${guiaData.numeroCarteira}`,
+              admissionDate: new Date(),
+              roomNumber: 'PENDENTE',
+              responsibleDoctor: 'PENDENTE',
+              insurancePlan: 'PENDENTE',
+              insuranceValidity: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 ano
+              accommodationType: 'STANDARD',
+              currentAccommodation: 'STANDARD',
+              accommodationStatus: 'OCCUPIED',
+              status: 'ACTIVE',
+              validationStatus: 'PENDING'*/
             });
 
             patientId = newPatient.data?.id || newPatient.id;
@@ -187,12 +206,35 @@ class Orchestrator {
       // ========================================
       const { procedimentos: _, ...dadosGuia } = guiaData;
 
+      // Prisma will throw on unknown fields (e.g. 'tipoGuia').
+      // Only allow fields that exist on the Guia model to avoid
+      // "Unknown argument `xxx`" errors coming from Prisma.
+      const allowedGuiaFields = new Set([
+        'numeroGuiaPrestador', 'numeroGuiaOperadora', 'numeroCarteira', 'senha',
+        'dataAutorizacao', 'dataValidadeSenha', 'atendimentoRN', 'tipoTransacao', 'loteGuia',
+        'patientId', 'caraterAtendimento', 'tipoFaturamento', 'dataInicioFaturamento', 'dataFinalFaturamento',
+        'tipoInternacao', 'regimeInternacao', 'diagnostico', 'indicadorAcidente', 'motivoEncerramento',
+        'outrasDespesas', 'valorTotalProcedimentos', 'valorTotalDiarias', 'valorTotalTaxasAlugueis',
+        'valorTotalMateriais', 'valorTotalMedicamentos', 'valorTotalOPME', 'valorTotalGasesMedicinais',
+        'valorTotalGeral', 'observacao', 'tipoGuia', 'patientId'
+      ]);
+
+      const sanitizedData: any = {};
+      for (const key of Object.keys(dadosGuia)) {
+        if (allowedGuiaFields.has(key)) {
+          sanitizedData[key] = (dadosGuia as any)[key];
+        } else {
+          // silently ignore unknown fields but log for visibility
+          console.log(`⚠️ Ignorando campo desconhecido ao criar guia: ${key}`);
+        }
+      }
+
+      // ensure patientId is set when available
+      if (patientId) sanitizedData.patientId = patientId;
+
       console.log('\n📄 Criando guia...');
       const novaGuia = await prisma.guia.create({
-        data: {
-          ...dadosGuia,
-          patientId: patientId || undefined,
-        },
+        data: sanitizedData,
       });
 
       createdGuiaId = novaGuia.id; // Marcar para possível rollback

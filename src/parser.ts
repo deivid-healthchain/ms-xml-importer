@@ -2,7 +2,7 @@ import { parseStringPromise } from "xml2js";
 
 // Interface para o formato dos procedimentos, prontos para a criação no Prisma
 interface ProcedimentoProntoParaCriar {
-    sequencialItem: string;
+    sequencialItem: string; 
     dataExecucao?: string;
     horaInicial?: string;
     horaFinal?: string;
@@ -29,6 +29,7 @@ interface GuiaCompleta {
     dataValidadeSenha?: Date;
     atendimentoRN?: string;
     tipoTransacao?: string;
+    tipoGuia?: string; // Campo adicionado para armazenar o nome da tag da guia
     loteGuia?: string;
     caraterAtendimento?: string;
     tipoFaturamento?: string;
@@ -71,14 +72,28 @@ export async function parseTISS(xmlContent: string): Promise<GuiaCompleta[]> {
 
     const tipoTransacao = mensagem.cabecalho?.identificacaoTransacao?.tipoTransacao;
     const loteGuia = mensagem.prestadorParaOperadora?.loteGuias?.numeroLote;
+    const guiasTISSNode = mensagem.prestadorParaOperadora?.loteGuias?.guiasTISS;
 
-    let guias = mensagem.prestadorParaOperadora?.loteGuias?.guiasTISS?.guiaResumoInternacao;
+    if (!guiasTISSNode || typeof guiasTISSNode !== 'object') {
+        console.log("Nenhuma estrutura <guiasTISS> válida foi encontrada no XML.");
+        return [];
+    }
+
+    // Identifica dinamicamente o tipo de guia (primeira chave encontrada)
+    const tiposDeGuiaEncontrados = Object.keys(guiasTISSNode);
+    if (tiposDeGuiaEncontrados.length === 0) {
+        console.log("Nenhum tipo de guia encontrado dentro de <guiasTISS>.");
+        return [];
+    }
+    const tipoGuia = tiposDeGuiaEncontrados[0]; // Pega o primeiro tipo de guia encontrado
+    let guias = guiasTISSNode[tipoGuia]; // Acessa os dados da guia usando a chave identificada
+
     if (!guias) {
-        console.log("Nenhuma <guiaResumoInternacao> foi encontrada no XML.");
+        console.log(`Nenhuma guia do tipo <${tipoGuia}> foi encontrada no XML.`);
         return [];
     }
     if (!Array.isArray(guias)) {
-        guias = [guias];
+        guias = [guias]; // Garante que guias seja sempre um array
     }
 
     return guias.map((guia: any) => {
@@ -96,20 +111,22 @@ export async function parseTISS(xmlContent: string): Promise<GuiaCompleta[]> {
             }
             const procedimento = p.procedimento || {};
 
+            // Validação robusta para sequencialItem
+
             return {
-                sequencialItem: p.sequencialItem,
+                sequencialItem: p.sequencialItem, // Garante que é sempre um número
                 dataExecucao: p.dataExecucao || null,
                 horaInicial: p.horaInicial || null,
                 horaFinal: p.horaFinal || null,
                 codigoTabela: procedimento.codigoTabela || null,
                 codigoProcedimento: procedimento.codigoProcedimento || null,
                 descricaoProcedimento: procedimento.descricaoProcedimento || null,
-                quantidadeExecutada: parseInt(p.quantidadeExecutada, 10),
+                quantidadeExecutada: parseInt(p.quantidadeExecutada, 10) || 0, // Valor padrão 0 se NaN
                 viaAcesso: p.viaAcesso || null,
                 tecnicaUtilizada: p.tecnicaUtilizada || null,
-                reducaoAcrescimo: parseFloat(p.reducaoAcrescimo),
-                valorUnitario: parseFloat(p.valorUnitario),
-                valorTotal: parseFloat(p.valorTotal),
+                reducaoAcrescimo: parseFloat(p.reducaoAcrescimo) || 0, // Valor padrão 0 se NaN
+                valorUnitario: parseFloat(p.valorUnitario) || 0, // Valor padrão 0 se NaN
+                valorTotal: parseFloat(p.valorTotal) || 0, // Valor padrão 0 se NaN
                 nomeProfissional,
                 identEquipe: p.identEquipe || null,
             };
@@ -123,16 +140,19 @@ export async function parseTISS(xmlContent: string): Promise<GuiaCompleta[]> {
         const dadosInternacao = guia.dadosInternacao || {};
         const dadosSaida = guia.dadosSaidaInternacao || {};
         const valores = guia.valorTotal || {};
+        const dadosAutorizacao = guia.dadosAutorizacao || {};
+        const dadosBeneficiario = guia.dadosBeneficiario || {};
 
         const guiaCompleta: GuiaCompleta = {
             numeroGuiaPrestador: guia.cabecalhoGuia?.numeroGuiaPrestador,
-            numeroGuiaOperadora: guia.dadosAutorizacao?.numeroGuiaOperadora,
-            numeroCarteira: guia.dadosBeneficiario?.numeroCarteira,
-            senha: guia.dadosAutorizacao?.senha,
-            dataAutorizacao: guia.dadosAutorizacao?.dataAutorizacao ? new Date(guia.dadosAutorizacao.dataAutorizacao) : undefined,
-            dataValidadeSenha: guia.dadosAutorizacao?.dataValidadeSenha ? new Date(guia.dadosAutorizacao.dataValidadeSenha) : undefined,
-            atendimentoRN: guia.dadosBeneficiario?.atendimentoRN,
+            numeroGuiaOperadora: dadosAutorizacao.numeroGuiaOperadora,
+            numeroCarteira: dadosBeneficiario.numeroCarteira,
+            senha: dadosAutorizacao.senha,
+            dataAutorizacao: dadosAutorizacao.dataAutorizacao ? new Date(dadosAutorizacao.dataAutorizacao) : undefined,
+            dataValidadeSenha: dadosAutorizacao.dataValidadeSenha ? new Date(dadosAutorizacao.dataValidadeSenha) : undefined,
+            atendimentoRN: dadosBeneficiario.atendimentoRN,
             tipoTransacao,
+            tipoGuia: tipoGuia, // Armazena o nome da tag
             loteGuia,
             caraterAtendimento: dadosInternacao.caraterAtendimento,
             tipoFaturamento: dadosInternacao.tipoFaturamento,

@@ -1,7 +1,7 @@
 import HttpClient from './httpClient';
 
-const MS_PROCEDURES_URL = process.env.MS_PROCEDURES_URL || 'http://10.0.215.56:3002/api/v1';
-const MS_PROCEDURES_HEALTH = 'http://10.0.215.56:3002';
+const MS_PROCEDURES_URL = process.env.MS_PROCEDURES_URL || 'http://localhost/procedures/api/v1/';
+const MS_PROCEDURES_HEALTH = process.env.MS_PROCEDURES_HEALTH || 'http://localhost/procedures';
 
 class ProceduresClient {
   private client: HttpClient;

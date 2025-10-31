@@ -5,7 +5,7 @@ import routes from './routes';
 
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3007;
 
 app.use(cors()); // permite requisições do frontend
 app.use(express.json());
