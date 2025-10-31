@@ -78,7 +78,7 @@ Para iniciar o servidor em modo de desenvolvimento (com hot-reload), execute:
 npm run dev
 ```
 
-O servidor estará rodando em `http://localhost:3000` (ou na porta definida no seu código).
+O servidor estará rodando em `http://localhost:3007` (ou na porta definida em `PORT`). As rotas estão sob o prefixo `/api`.
 
 ---
 
@@ -95,10 +95,10 @@ O servidor estará rodando em `http://localhost:3000` (ou na porta definida no s
 
 ```bash
 # Para enviar um arquivo XML
-curl -X POST -F "file=@/caminho/para/seu/arquivo.xml" http://localhost:3000/upload
+curl -X POST -F "file=@/caminho/para/seu/arquivo.xml" http://localhost:3007/api/upload
 
 # Para enviar um arquivo ZIP
-curl -X POST -F "file=@/caminho/para/seu/arquivo.zip" http://localhost:3000/upload
+curl -X POST -F "file=@/caminho/para/seu/arquivo.zip" http://localhost:3007/api/upload
 ```
 
 #### Respostas
@@ -121,3 +121,98 @@ curl -X POST -F "file=@/caminho/para/seu/arquivo.zip" http://localhost:3000/uplo
     "error": "Erro interno ao processar o arquivo."
   }
   ```
+
+---
+
+## 🔐 Autenticação entre Microsserviços (API Key e Bearer opcional)
+
+Este backend integra com microsserviços externos (por exemplo, ms-patients e ms-procedures). O cliente HTTP agora suporta envio automático de API Key e, opcionalmente, o cabeçalho `Authorization: Bearer ...`.
+
+### Como funciona
+
+- O `HttpClient` injeta automaticamente:
+  - Cabeçalho de API Key: nome configurável (padrão `x-api-key`), valor vindo do `.env`.
+  - Bearer Token: somente se habilitado via `.env`. Caso o token falhe ao ser obtido, a requisição segue sem `Authorization` (soft-fail).
+- Health checks usam apenas API Key (sem Bearer por padrão).
+
+### Variáveis de ambiente
+
+Você pode configurar chaves globais ou específicas por serviço:
+
+```env
+# Porta do backend (opcional)
+PORT=3007
+
+# URLs dos microsserviços (exemplos)
+MS_PATIENTS_URL=http://localhost:3001/api/v1
+MS_PATIENTS_HEALTH=http://localhost:3001
+MS_PROCEDURES_URL=http://localhost:3002/api/v1
+MS_PROCEDURES_HEALTH=http://localhost:3002
+
+# API Key (global) – usada como fallback
+API_KEY=seu_api_key
+API_KEY_HEADER=x-api-key
+
+# API Key por serviço (opcional)
+MS_PATIENTS_API_KEY=seu_api_key_pacientes
+MS_PATIENTS_API_KEY_HEADER=x-api-key
+MS_PROCEDURES_API_KEY=seu_api_key_procedures
+MS_PROCEDURES_API_KEY_HEADER=x-api-key
+
+# Habilitar Bearer por serviço (desabilitado por padrão)
+MS_PATIENTS_USE_BEARER=false
+MS_PROCEDURES_USE_BEARER=false
+
+# Global (alternativa):
+MS_USE_BEARER_AUTH=false
+
+# Se Bearer estiver habilitado, configure também as credenciais do TokenManager
+# MS_AUTH_URL=https://seu-auth
+# MS_AUTH_TOKEN=token_inicial_opcional
+# MS_REFRESH_TOKEN=refresh_token
+```
+
+Notas:
+- Ordem de resolução da API Key: específica do serviço → global → sem chave.
+- O cabeçalho padrão é `x-api-key`, mas você pode trocá-lo por serviço ou globalmente.
+- Health checks usam `useAuth: false` (sem Bearer), mas incluem a API Key se configurada.
+
+---
+
+## 🔌 Integrações e Fluxo
+
+Durante a importação de uma guia, o orquestrador pode:
+- Buscar/criar paciente no ms-patients (`/patients/from-xml`).
+- Validar e criar procedimentos no ms-procedures.
+- Persistir a guia e os procedimentos localmente via Prisma.
+
+Campos desconhecidos enviados para criação de `Guia` são ignorados com log para evitar erros do Prisma (whitelist de campos permitidos).
+
+---
+
+## 🧩 Prisma e Banco de Dados
+
+Este projeto usa Prisma. Dicas úteis:
+
+```bash
+# Aplicar migrações (dev)
+npx prisma migrate dev --name init
+
+# Sincronizar schema com o banco existente (introspecção)
+npx prisma db pull
+
+# Gerar Prisma Client
+npx prisma generate
+```
+
+Se você vir erros como `Unknown argument "patientId"` ao criar `Guia`, verifique se o schema contém o campo `patientId` e a relação com `Patient`. Depois rode `npx prisma generate` para atualizar o client.
+
+---
+
+## 📜 Changelog (resumo das últimas alterações)
+
+- Suporte a API Key no `HttpClient` com cabeçalho configurável e headers extras.
+- Bearer Token opcional (por serviço) com degradação suave quando ausente.
+- `patientsClient` e `proceduresClient` atualizados para usar API Key automaticamente.
+- Health checks sem Bearer, apenas API Key.
+- Orquestrador saneia campos de `Guia` para evitar erros de Prisma por argumentos desconhecidos.

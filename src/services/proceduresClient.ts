@@ -8,8 +8,21 @@ class ProceduresClient {
   private healthClient: HttpClient;
 
   constructor() {
-    this.client = new HttpClient(MS_PROCEDURES_URL);
-	this.healthClient = new HttpClient(MS_PROCEDURES_HEALTH);
+    const apiKey = process.env.MS_PROCEDURES_API_KEY || process.env.MS_API_KEY || process.env.API_KEY;
+    const apiKeyHeader = process.env.MS_PROCEDURES_API_KEY_HEADER || process.env.MS_API_KEY_HEADER || process.env.API_KEY_HEADER || 'x-api-key';
+    const useAuth = ((process.env.MS_PROCEDURES_USE_BEARER || process.env.MS_USE_BEARER_AUTH) === 'true');
+
+    this.client = new HttpClient(MS_PROCEDURES_URL, 30000, {
+      apiKey,
+      apiKeyHeader,
+      useAuth,
+    });
+
+	this.healthClient = new HttpClient(MS_PROCEDURES_HEALTH, 10000, {
+      apiKey,
+      apiKeyHeader,
+      useAuth: false,
+    });
   }
 
   /**

@@ -8,8 +8,21 @@ class PatientsClient {
   private healthClient: HttpClient;
 
   constructor() {
-    this.client = new HttpClient(CHECK_MS_PATIENTS);
-	this.healthClient = new HttpClient(CHECK_PATIENTS_HEALTH);
+    const apiKey = process.env.MS_PATIENTS_API_KEY || process.env.MS_API_KEY || process.env.API_KEY;
+    const apiKeyHeader = process.env.MS_PATIENTS_API_KEY_HEADER || process.env.MS_API_KEY_HEADER || process.env.API_KEY_HEADER || 'x-api-key';
+    const useAuth = ((process.env.MS_PATIENTS_USE_BEARER || process.env.MS_USE_BEARER_AUTH) === 'true');
+
+    this.client = new HttpClient(CHECK_MS_PATIENTS, 30000, {
+      apiKey,
+      apiKeyHeader,
+      useAuth,
+    });
+
+	this.healthClient = new HttpClient(CHECK_PATIENTS_HEALTH, 10000, {
+      apiKey,
+      apiKeyHeader,
+      useAuth: false, // health endpoints geralmente não exigem bearer
+    });
   }
 
   /**
