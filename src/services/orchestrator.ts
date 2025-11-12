@@ -1,6 +1,7 @@
 import { prisma } from '../db';
 import patientsClient from './patientsClient';
 import proceduresClient from './proceduresClient';
+import contractsClient from './contractsClient';
 
 interface GuiaData {
   numeroGuiaPrestador: string;
@@ -329,6 +330,79 @@ class Orchestrator {
       }
 
       console.log(`✅ Procedimentos salvos localmente`);
+
+      // ========================================
+      // ETAPA 7: VALIDAÇÃO CONTRATUAL
+      // ========================================
+      console.log('\n💼 Validando procedimentos contra contratos...');
+
+      try {
+        await contractsClient.healthCheck();
+        console.log('✅ ms-contracts está disponível');
+
+        // Validar cada procedimento criado
+        for (let i = 0; i < procedimentos.length; i++) {
+          const proc = procedimentos[i];
+          
+          // Pular se não tiver código TUSS
+          if (!proc.codigoProcedimento) {
+            console.log(`  ⚠️  Procedimento ${i + 1} sem código TUSS - pulando validação contratual`);
+            continue;
+          }
+
+          try {
+            console.log(`\n  [${i + 1}/${procedimentos.length}] Validando contrato do procedimento ${proc.codigoProcedimento}...`);
+            
+            // Validar procedimento contra contrato
+            const validacao = await contractsClient.validateProcedimento({
+              operadoraId: guiaData.operadoraId || '5460ecf6-3ea2-4088-bd8a-6198cfe2d76f', // ID padrão ou do XML
+              codigoTUSS: proc.codigoProcedimento,
+              valorCobrado: proc.valorTotal || 0,
+              quantidade: proc.quantidadeExecutada || 1,
+              materiais: proc.materiais || [],
+              pacote: proc.pacote || null
+            });
+
+            // Registrar divergências contratuais
+            if (!validacao.conforme) {
+              validacao.divergencias.forEach(div => {
+                validationIssues.push({
+                  type: 'CONTRACT_DIVERGENCE',
+                  subtype: div.tipo,
+                  procedureCode: proc.codigoProcedimento,
+                  severity: div.severidade,
+                  message: div.mensagem,
+                  valorCobrado: validacao.valorCobrado,
+                  valorContrato: validacao.valorContrato,
+                  diferenca: validacao.diferenca
+                });
+              });
+
+              console.log(`  ⚠️  ${validacao.divergencias.length} divergência(s) contratual(is) encontrada(s)`);
+            } else {
+              console.log(`  ✅ Procedimento conforme ao contrato`);
+            }
+
+          } catch (error: any) {
+            console.error(`  ❌ Erro ao validar contrato do procedimento ${proc.codigoProcedimento}:`, error.message);
+            // Não bloqueia a importação, apenas registra o erro
+            validationIssues.push({
+              type: 'CONTRACT_VALIDATION_ERROR',
+              procedureCode: proc.codigoProcedimento,
+              severity: 'BAIXA',
+              message: `Erro ao validar contrato: ${error.message}`
+            });
+          }
+        }
+
+        const contractDivergences = validationIssues.filter(v => v.type === 'CONTRACT_DIVERGENCE').length;
+        console.log(`\n✅ Validação contratual concluída`);
+        console.log(`   - Total de divergências contratuais: ${contractDivergences}`);
+        
+      } catch (error) {
+        console.error('❌ ms-contracts não está disponível - pulando validação contratual');
+        // Continua sem validação contratual
+      }
 
       // ========================================
       // SUCESSO FINAL
