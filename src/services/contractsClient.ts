@@ -1,6 +1,7 @@
 import HttpClient from './httpClient';
 
-const CONTRACTS_SERVICE_URL = process.env.MS_CONTRACTS_URL || 'http://contracts-service/api';
+const CONTRACTS_SERVICE_URL = process.env.MS_CONTRACTS_URL || 'http://48.192.39.147/contracts/api';
+const HEALTH_SERVICE_URL = 'http://48.192.39.147/contracts';
 
 interface ValidationRequest {
   operadoraId: string;
@@ -46,10 +47,12 @@ interface Divergencia {
  */
 class ContractsClient {
   private client: HttpClient;
+  private healthClient: HttpClient;
 
   constructor() {
     // Criar cliente HTTP sem autenticação (comunicação interna)
-    this.client = new HttpClient(CONTRACTS_SERVICE_URL, 30000, { useAuth: false });
+    this.client = new HttpClient(CONTRACTS_SERVICE_URL, 80, { useAuth: false });
+    this.healthClient = new HttpClient(HEALTH_SERVICE_URL, 80, { useAuth: false });
   }
 
   /**
@@ -57,7 +60,7 @@ class ContractsClient {
    */
   async healthCheck(): Promise<void> {
     try {
-      await this.client.get('/health');
+      await this.healthClient.get('/health');
     } catch (error: any) {
       throw new Error(`ms-contracts health check failed: ${error.message}`);
     }
