@@ -98,7 +98,18 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
       originalname.endsWith('.xml')
     ) {
       console.log('📄 XML único detectado. Processando...');
-      const xmlContent = fs.readFileSync(path, 'utf-8');
+      
+      // Ler XML como buffer primeiro para detectar encoding
+      const xmlBuffer = fs.readFileSync(path);
+      let xmlContent = xmlBuffer.toString('utf-8');
+      
+      // Detectar encoding do XML (ISO-8859-1 ou UTF-8)
+      const encodingMatch = xmlContent.match(/encoding=["']([^"']+)["']/);
+      if (encodingMatch && encodingMatch[1].toLowerCase().includes('iso-8859')) {
+        console.log(`🔄 Detectado encoding ${encodingMatch[1]}, convertendo para UTF-8...`);
+        // Recodificar de ISO-8859-1 para UTF-8
+        xmlContent = xmlBuffer.toString('latin1');
+      }
       
       // Extrair números das guias
       const numbers = await extractGuiaNumbers(xmlContent);
