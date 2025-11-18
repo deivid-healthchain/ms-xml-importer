@@ -311,11 +311,32 @@ class Orchestrator {
       }
 
       // ========================================
-      // ETAPA 6: Salvar procedimentos localmente
+      // ETAPA 6: Consolidar e salvar procedimentos localmente
       // ========================================
-      console.log('\n💾 Salvando procedimentos no banco local...');
+      console.log('\n💾 Consolidando e salvando procedimentos no banco local...');
 
+      // Consolidar procedimentos duplicados (mesmo código)
+      const procedimentosConsolidados = new Map<string, any>();
+      
       for (const proc of procedimentos) {
+        const key = proc.codigoProcedimento || `sem-codigo-${Math.random()}`;
+        
+        if (procedimentosConsolidados.has(key)) {
+          // Procedimento duplicado - somar quantidade
+          const existing = procedimentosConsolidados.get(key);
+          existing.quantidadeExecutada = (parseFloat(existing.quantidadeExecutada) || 0) + (parseFloat(proc.quantidadeExecutada) || 0);
+          existing.valorTotal = (parseFloat(existing.valorTotal) || 0) + (parseFloat(proc.valorTotal) || 0);
+          console.log(`  🔄 Procedimento ${key} duplicado - quantidade consolidada: ${existing.quantidadeExecutada}`);
+        } else {
+          // Primeiro procedimento com este código
+          procedimentosConsolidados.set(key, { ...proc });
+        }
+      }
+
+      console.log(`📊 ${procedimentos.length} procedimentos → ${procedimentosConsolidados.size} após consolidação`);
+
+      // Salvar procedimentos consolidados
+      for (const proc of procedimentosConsolidados.values()) {
         try {
           await prisma.procedimento.create({
             data: {
@@ -329,7 +350,7 @@ class Orchestrator {
         }
       }
 
-      console.log(`✅ Procedimentos salvos localmente`);
+      console.log(`✅ ${procedimentosConsolidados.size} procedimentos consolidados salvos localmente`);
 
       // ========================================
       // ETAPA 7: VALIDAÇÃO CONTRATUAL
