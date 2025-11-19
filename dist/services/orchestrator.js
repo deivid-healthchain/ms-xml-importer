@@ -1,0 +1,437 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const db_1 = require("../db");
+const patientsClient_1 = __importDefault(require("./patientsClient"));
+const proceduresClient_1 = __importDefault(require("./proceduresClient"));
+const contractsClient_1 = __importDefault(require("./contractsClient"));
+/**
+ * Orquestrador com suporte a transações e rollback
+ * Implementa Saga Pattern para consistência entre microsserviços
+ */
+class Orchestrator {
+    /**
+     * Verifica se todos os serviços necessários estão disponíveis
+     */
+    async healthCheck() {
+        const unavailableServices = [];
+        // Verificar ms-patients
+        try {
+            await patientsClient_1.default.healthCheck();
+            console.log('✅ ms-patients está disponível');
+        }
+        catch (error) {
+            console.error('❌ ms-patients não está disponível');
+            unavailableServices.push('ms-patients');
+        }
+        // Verificar ms-procedures
+        try {
+            await proceduresClient_1.default.healthCheck();
+            console.log('✅ ms-procedures está disponível');
+        }
+        catch (error) {
+            console.error('❌ ms-procedures não está disponível');
+            unavailableServices.push('ms-procedures');
+        }
+        return {
+            healthy: unavailableServices.length === 0,
+            unavailableServices,
+        };
+    }
+    /**
+     * Deleta um paciente (rollback)
+     */
+    async rollbackPatient(patientId) {
+        try {
+            console.log(`🔄 Rollback: Deletando paciente ${patientId}...`);
+            await patientsClient_1.default.delete(patientId);
+            console.log(`✅ Paciente ${patientId} deletado com sucesso`);
+        }
+        catch (error) {
+            console.error(`❌ Erro ao deletar paciente ${patientId}:`, error.message);
+            // Não propagar erro de rollback para não mascarar o erro original
+        }
+    }
+    /**
+     * Deleta uma guia (rollback)
+     */
+    async rollbackGuia(guiaId) {
+        try {
+            console.log(`🔄 Rollback: Deletando guia ${guiaId}...`);
+            await db_1.prisma.guia.delete({
+                where: { id: guiaId },
+            });
+            console.log(`✅ Guia ${guiaId} deletada com sucesso`);
+        }
+        catch (error) {
+            console.error(`❌ Erro ao deletar guia ${guiaId}:`, error.message);
+        }
+    }
+    /**
+     * Deleta procedimentos criados no ms-procedures (rollback)
+     */
+    async rollbackProcedures(procedureIds) {
+        console.log(`🔄 Rollback: Deletando ${procedureIds.length} procedimentos...`);
+        for (const procedureId of procedureIds) {
+            try {
+                await proceduresClient_1.default.delete(procedureId);
+                console.log(`✅ Procedimento ${procedureId} deletado`);
+            }
+            catch (error) {
+                console.error(`❌ Erro ao deletar procedimento ${procedureId}:`, error.message);
+            }
+        }
+    }
+    /**
+     * Processa uma guia completa do XML com suporte a transações
+     */
+    async processGuia(guiaData) {
+        console.log(`\n🔄 Orquestrando importação da guia ${guiaData.numeroGuiaPrestador}...`);
+        let createdPatientId = null;
+        let createdGuiaId = null;
+        let createdProcedureIds = [];
+        let rollbackPerformed = false;
+        try {
+            // ========================================
+            // ETAPA 0: Health Check
+            // ========================================
+            console.log('\n📋 Verificando disponibilidade dos serviços...');
+            const health = await this.healthCheck();
+            if (!health.healthy) {
+                throw new Error(`Serviços indisponíveis: ${health.unavailableServices.join(', ')}. ` +
+                    `Não é possível processar a guia sem todos os serviços ativos.`);
+            }
+            // ========================================
+            // ETAPA 1: Verificar se guia já existe
+            // ========================================
+            const guiaExistente = await db_1.prisma.guia.findUnique({
+                where: { numeroGuiaPrestador: guiaData.numeroGuiaPrestador },
+            });
+            if (guiaExistente) {
+                console.log(`⚠️  Guia ${guiaData.numeroGuiaPrestador} já existe. Pulando.`);
+                return {
+                    success: false,
+                    error: 'Guia já existe',
+                };
+            }
+            // ========================================
+            // ETAPA 2: Buscar ou criar paciente
+            // ========================================
+            let patientId = null;
+            if (guiaData.numeroCarteira) {
+                console.log(`\n👤 Buscando paciente com carteira ${guiaData.numeroCarteira}...`);
+                const existingPatient = await patientsClient_1.default.findByInsuranceNumber(guiaData.numeroCarteira);
+                if (existingPatient) {
+                    patientId = existingPatient.data?.id || existingPatient.id;
+                    console.log(`✅ Paciente encontrado: ${patientId}`);
+                }
+                else {
+                    console.log(`📝 Paciente não encontrado. Criando novo paciente...`);
+                    try {
+                        const newPatient = await patientsClient_1.default.createFromXml({
+                            numeroCarteira: guiaData.numeroCarteira
+                            /*nomeBeneficiario: guiaData.nomeBeneficiario,
+                            // Campos obrigatórios com valores padrão
+                            cpf: 'PENDENTE',
+                            rg: 'PENDENTE',
+                            birthDate: new Date(),
+                            gender: 'OTHER',
+                            phone: 'PENDENTE',
+                            email: 'pendente@temp.com',
+                            address: 'PENDENTE',
+                            medicalRecordNumber: `TEMP-${guiaData.numeroCarteira}`,
+                            admissionDate: new Date(),
+                            roomNumber: 'PENDENTE',
+                            responsibleDoctor: 'PENDENTE',
+                            insurancePlan: 'PENDENTE',
+                            insuranceValidity: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 ano
+                            accommodationType: 'STANDARD',
+                            currentAccommodation: 'STANDARD',
+                            accommodationStatus: 'OCCUPIED',
+                            status: 'ACTIVE',
+                            validationStatus: 'PENDING'*/
+                        });
+                        patientId = newPatient.data?.id || newPatient.id;
+                        createdPatientId = patientId; // Marcar para possível rollback
+                        console.log(`✅ Paciente criado: ${patientId}`);
+                    }
+                    catch (error) {
+                        throw new Error(`Falha ao criar paciente: ${error.message}`);
+                    }
+                }
+            }
+            // ========================================
+            // ETAPA 3: Validar que há procedimentos
+            // ========================================
+            const procedimentos = guiaData.procedimentos || [];
+            if (procedimentos.length === 0) {
+                throw new Error('Não é possível criar uma guia de auditoria sem procedimentos');
+            }
+            console.log(`\n🔬 ${procedimentos.length} procedimentos para processar`);
+            // ========================================
+            // ETAPA 4: Criar guia no banco
+            // ========================================
+            const { procedimentos: _, ...dadosGuia } = guiaData;
+            // Prisma will throw on unknown fields (e.g. 'tipoGuia').
+            // Only allow fields that exist on the Guia model to avoid
+            // "Unknown argument `xxx`" errors coming from Prisma.
+            const allowedGuiaFields = new Set([
+                'numeroGuiaPrestador', 'numeroGuiaOperadora', 'numeroCarteira', 'senha',
+                'dataAutorizacao', 'dataValidadeSenha', 'atendimentoRN', 'tipoTransacao', 'loteGuia',
+                'patientId', 'caraterAtendimento', 'tipoFaturamento', 'dataInicioFaturamento', 'dataFinalFaturamento',
+                'tipoInternacao', 'regimeInternacao', 'diagnostico', 'indicadorAcidente', 'motivoEncerramento',
+                'outrasDespesas', 'valorTotalProcedimentos', 'valorTotalDiarias', 'valorTotalTaxasAlugueis',
+                'valorTotalMateriais', 'valorTotalMedicamentos', 'valorTotalOPME', 'valorTotalGasesMedicinais',
+                'valorTotalGeral', 'observacao', 'tipoGuia', 'patientId'
+            ]);
+            const sanitizedData = {};
+            for (const key of Object.keys(dadosGuia)) {
+                if (allowedGuiaFields.has(key)) {
+                    sanitizedData[key] = dadosGuia[key];
+                }
+                else {
+                    // silently ignore unknown fields but log for visibility
+                    console.log(`⚠️ Ignorando campo desconhecido ao criar guia: ${key}`);
+                }
+            }
+            // ensure patientId is set when available
+            if (patientId)
+                sanitizedData.patientId = patientId;
+            console.log('\n📄 Criando guia...');
+            const novaGuia = await db_1.prisma.guia.create({
+                data: sanitizedData,
+            });
+            createdGuiaId = novaGuia.id; // Marcar para possível rollback
+            console.log(`✅ Guia criada: ${novaGuia.id}`);
+            // ========================================
+            // ETAPA 5: Criar procedimentos no ms-procedures
+            // ========================================
+            console.log('\n🔬 Criando procedimentos no ms-procedures...');
+            const validationIssues = [];
+            for (let i = 0; i < procedimentos.length; i++) {
+                const proc = procedimentos[i];
+                console.log(`\n  [${i + 1}/${procedimentos.length}] Processando procedimento ${proc.codigoProcedimento || 'sem código'}...`);
+                try {
+                    // Validar porte se disponível
+                    let porteValidation = null;
+                    if (proc.codigoProcedimento && proc.grauParticipacao) {
+                        try {
+                            porteValidation = await proceduresClient_1.default.validatePorte(proc.codigoProcedimento, proc.grauParticipacao);
+                            if (!porteValidation.isValid) {
+                                validationIssues.push({
+                                    type: 'PORTE_DIVERGENCE',
+                                    procedureCode: proc.codigoProcedimento,
+                                    reported: proc.grauParticipacao,
+                                    expected: porteValidation.expectedPorte,
+                                    severity: porteValidation.severity,
+                                });
+                                console.log(`  ⚠️  Divergência de porte: informado ${proc.grauParticipacao}, esperado ${porteValidation.expectedPorte}`);
+                            }
+                            else {
+                                console.log(`  ✅ Porte validado: ${proc.grauParticipacao}`);
+                            }
+                        }
+                        catch (error) {
+                            // Validação de porte falhou, mas não bloqueia criação
+                            console.error(`  ⚠️  Erro ao validar porte (continuando):`, error.message);
+                        }
+                    }
+                    // Criar procedimento no ms-procedures
+                    const createdProcedure = await proceduresClient_1.default.create({
+                        patientId: patientId,
+                        guiaId: novaGuia.id,
+                        code: proc.codigoProcedimento,
+                        description: proc.descricaoProcedimento,
+                        quantity: proc.quantidadeExecutada,
+                        unitPrice: proc.valorUnitario,
+                        totalPrice: proc.valorTotal,
+                        executionDate: proc.dataExecucao,
+                        reportedPorte: proc.grauParticipacao,
+                        validatedPorte: porteValidation?.expectedPorte,
+                        porteValidation: porteValidation,
+                        // Adicionar outros campos conforme necessário
+                    });
+                    const procedureId = createdProcedure.data?.id || createdProcedure.id;
+                    createdProcedureIds.push(procedureId);
+                    console.log(`  ✅ Procedimento criado no ms-procedures: ${procedureId}`);
+                }
+                catch (error) {
+                    // ERRO CRÍTICO: Falha ao criar procedimento
+                    console.error(`  ❌ ERRO CRÍTICO ao criar procedimento:`, error.message);
+                    throw new Error(`Falha ao criar procedimento ${i + 1}/${procedimentos.length} ` +
+                        `(código: ${proc.codigoProcedimento}): ${error.message}`);
+                }
+            }
+            // ========================================
+            // ETAPA 6: Consolidar e salvar procedimentos localmente
+            // ========================================
+            console.log('\n💾 Consolidando e salvando procedimentos no banco local...');
+            // Consolidar procedimentos duplicados (mesmo código)
+            const procedimentosConsolidados = new Map();
+            for (const proc of procedimentos) {
+                const key = proc.codigoProcedimento || `sem-codigo-${Math.random()}`;
+                if (procedimentosConsolidados.has(key)) {
+                    // Procedimento duplicado - somar quantidade
+                    const existing = procedimentosConsolidados.get(key);
+                    existing.quantidadeExecutada = (parseFloat(existing.quantidadeExecutada) || 0) + (parseFloat(proc.quantidadeExecutada) || 0);
+                    existing.valorTotal = (parseFloat(existing.valorTotal) || 0) + (parseFloat(proc.valorTotal) || 0);
+                    console.log(`  🔄 Procedimento ${key} duplicado - quantidade consolidada: ${existing.quantidadeExecutada}`);
+                }
+                else {
+                    // Primeiro procedimento com este código
+                    procedimentosConsolidados.set(key, { ...proc });
+                }
+            }
+            console.log(`📊 ${procedimentos.length} procedimentos → ${procedimentosConsolidados.size} após consolidação`);
+            // Salvar procedimentos consolidados
+            for (const proc of procedimentosConsolidados.values()) {
+                try {
+                    await db_1.prisma.procedimento.create({
+                        data: {
+                            ...proc,
+                            guiaId: novaGuia.id,
+                        },
+                    });
+                }
+                catch (error) {
+                    console.error(`⚠️  Erro ao salvar procedimento localmente:`, error.message);
+                    // Não bloqueia, pois o procedimento já foi criado no ms-procedures
+                }
+            }
+            console.log(`✅ ${procedimentosConsolidados.size} procedimentos consolidados salvos localmente`);
+            // ========================================
+            // ETAPA 7: VALIDAÇÃO CONTRATUAL
+            // ========================================
+            console.log('\n💼 Validando procedimentos contra contratos...');
+            try {
+                await contractsClient_1.default.healthCheck();
+                console.log('✅ ms-contracts está disponível');
+                // Validar cada procedimento criado
+                for (let i = 0; i < procedimentos.length; i++) {
+                    const proc = procedimentos[i];
+                    // Pular se não tiver código TUSS
+                    if (!proc.codigoProcedimento) {
+                        console.log(`  ⚠️  Procedimento ${i + 1} sem código TUSS - pulando validação contratual`);
+                        continue;
+                    }
+                    try {
+                        console.log(`\n  [${i + 1}/${procedimentos.length}] Validando contrato do procedimento ${proc.codigoProcedimento}...`);
+                        // Validar procedimento contra contrato
+                        const validacao = await contractsClient_1.default.validateProcedimento({
+                            operadoraId: guiaData.operadoraId || '5460ecf6-3ea2-4088-bd8a-6198cfe2d76f', // ID padrão ou do XML
+                            codigoTUSS: proc.codigoProcedimento,
+                            valorCobrado: proc.valorTotal || 0,
+                            quantidade: proc.quantidadeExecutada || 1,
+                            materiais: proc.materiais || [],
+                            pacote: proc.pacote || null
+                        });
+                        // Registrar divergências contratuais
+                        if (!validacao.conforme) {
+                            validacao.divergencias.forEach(div => {
+                                validationIssues.push({
+                                    type: 'CONTRACT_DIVERGENCE',
+                                    subtype: div.tipo,
+                                    procedureCode: proc.codigoProcedimento,
+                                    severity: div.severidade,
+                                    message: div.mensagem,
+                                    valorCobrado: validacao.valorCobrado,
+                                    valorContrato: validacao.valorContrato,
+                                    diferenca: validacao.diferenca
+                                });
+                            });
+                            console.log(`  ⚠️  ${validacao.divergencias.length} divergência(s) contratual(is) encontrada(s)`);
+                        }
+                        else {
+                            console.log(`  ✅ Procedimento conforme ao contrato`);
+                        }
+                    }
+                    catch (error) {
+                        console.error(`  ❌ Erro ao validar contrato do procedimento ${proc.codigoProcedimento}:`, error.message);
+                        // Não bloqueia a importação, apenas registra o erro
+                        validationIssues.push({
+                            type: 'CONTRACT_VALIDATION_ERROR',
+                            procedureCode: proc.codigoProcedimento,
+                            severity: 'BAIXA',
+                            message: `Erro ao validar contrato: ${error.message}`
+                        });
+                    }
+                }
+                const contractDivergences = validationIssues.filter(v => v.type === 'CONTRACT_DIVERGENCE').length;
+                console.log(`\n✅ Validação contratual concluída`);
+                console.log(`   - Total de divergências contratuais: ${contractDivergences}`);
+            }
+            catch (error) {
+                console.error('❌ ms-contracts não está disponível - pulando validação contratual');
+                // Continua sem validação contratual
+            }
+            // ========================================
+            // SUCESSO FINAL
+            // ========================================
+            console.log('\n✅ ========================================');
+            console.log('✅ IMPORTAÇÃO CONCLUÍDA COM SUCESSO');
+            console.log('✅ ========================================');
+            console.log(`✅ Guia: ${novaGuia.id}`);
+            console.log(`✅ Paciente: ${patientId || 'N/A'}`);
+            console.log(`✅ Procedimentos criados: ${createdProcedureIds.length}`);
+            if (validationIssues.length > 0) {
+                console.log(`⚠️  Divergências de porte: ${validationIssues.length}`);
+            }
+            return {
+                success: true,
+                guiaId: novaGuia.id.toString(),
+                patientId: patientId || undefined,
+                proceduresCreated: createdProcedureIds.length,
+                validationIssues: validationIssues.length > 0 ? validationIssues : undefined,
+            };
+        }
+        catch (error) {
+            // ========================================
+            // ERRO: Executar Rollback
+            // ========================================
+            console.error('\n❌ ========================================');
+            console.error('❌ ERRO NA ORQUESTRAÇÃO - INICIANDO ROLLBACK');
+            console.error('❌ ========================================');
+            console.error(`❌ Erro: ${error.message}`);
+            rollbackPerformed = true;
+            // Rollback em ordem reversa da criação
+            // 1. Deletar procedimentos criados no ms-procedures
+            if (createdProcedureIds.length > 0) {
+                await this.rollbackProcedures(createdProcedureIds);
+            }
+            // 2. Deletar guia criada
+            if (createdGuiaId !== null) {
+                await this.rollbackGuia(createdGuiaId);
+            }
+            // 3. Deletar paciente criado (apenas se foi criado nesta transação)
+            if (createdPatientId !== null) {
+                await this.rollbackPatient(createdPatientId);
+            }
+            console.error('\n❌ Rollback concluído. Nenhum dado foi persistido.');
+            return {
+                success: false,
+                error: error.message,
+                rollbackPerformed: true,
+            };
+        }
+    }
+    /**
+     * Processa múltiplas guias
+     */
+    async processMultipleGuias(guias) {
+        const results = [];
+        for (const guia of guias) {
+            const result = await this.processGuia(guia);
+            results.push(result);
+            // Se falhou com rollback, pode querer parar o processamento
+            if (!result.success && result.rollbackPerformed) {
+                console.log('\n⚠️  Parando processamento de guias devido a erro crítico.');
+                break;
+            }
+        }
+        return results;
+    }
+}
+exports.default = new Orchestrator();
+//# sourceMappingURL=orchestrator.js.map

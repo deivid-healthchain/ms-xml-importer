@@ -61,7 +61,86 @@ async function extractGuiaNumbers(xmlContent: string): Promise<string[]> {
 }
 
 /**
- * Endpoint principal: Upload de arquivo (ZIP ou XML) - ASSÍNCRONO
+ * @swagger
+ * /api/upload:
+ *   post:
+ *     tags: [Upload]
+ *     summary: Upload de arquivo XML ou ZIP
+ *     description: |
+ *       Faz upload de um arquivo XML TISS (padrão ANS) ou ZIP contendo múltiplos XMLs.
+ *       O processamento é assíncrono - a resposta é retornada imediatamente com os números das guias,
+ *       enquanto o processamento completo ocorre em segundo plano.
+ *       
+ *       **Formatos aceitos:**
+ *       - `.xml` - Arquivo XML TISS único
+ *       - `.zip` - Arquivo ZIP contendo um ou mais XMLs TISS
+ *       
+ *       **Limite de tamanho:** 3 MB por arquivo
+ *       
+ *       **Encodings suportados:**
+ *       - UTF-8
+ *       - ISO-8859-1 (Latin-1)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: Arquivo XML ou ZIP contendo XMLs TISS
+ *     responses:
+ *       200:
+ *         description: Arquivo recebido e processamento iniciado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "✅ Arquivo recebido! 3 guia(s) sendo processada(s) em segundo plano."
+ *                 guias:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                   description: Números das guias identificadas no XML
+ *                   example: ["GUIA-2025-001", "GUIA-2025-002", "GUIA-2025-003"]
+ *                 totalGuias:
+ *                   type: integer
+ *                   example: 3
+ *                 status:
+ *                   type: string
+ *                   enum: [PROCESSANDO]
+ *                   example: PROCESSANDO
+ *       400:
+ *         description: Erro de validação
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Nenhum arquivo enviado."
+ *       500:
+ *         description: Erro interno do servidor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Erro interno ao processar o arquivo."
+ *                 details:
+ *                   type: string
+ *                   example: "XML parsing error: Invalid character"
  */
 router.post('/upload', upload.single('file'), async (req: Request, res: Response) => {
   if (!req.file) {
@@ -155,7 +234,30 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
 });
 
 /**
- * Endpoint de health check
+ * @swagger
+ * /api/health:
+ *   get:
+ *     tags: [Health]
+ *     summary: Verificação de saúde do serviço
+ *     description: Retorna o status do serviço e timestamp atual
+ *     responses:
+ *       200:
+ *         description: Serviço operacional
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: ok
+ *                 service:
+ *                   type: string
+ *                   example: ms-xml-importer
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                   example: "2025-03-18T10:30:00.000Z"
  */
 router.get('/health', (req: Request, res: Response) => {
   res.json({
