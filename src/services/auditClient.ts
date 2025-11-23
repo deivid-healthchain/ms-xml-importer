@@ -1,8 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import HttpClient from './httpClient';
 
-const AUDIT_SERVICE_URL = process.env.MS_AUDIT_URL || 'http://localhost:3004';
-const HEALTH_SERVICE_URL = 'http://48.192.39.147/audit';
+const AUDIT_SERVICE_URL = process.env.MS_AUDIT_URL || 'http://48.192.39.147/audit';
 
 interface ValidateGuiaRequest {
   guiaId: number;
@@ -22,7 +21,6 @@ interface ValidateGuiaResponse {
 
 class AuditClient {
   private client: AxiosInstance;
-  private healthClient: HttpClient;
 
   constructor() {
     this.client = axios.create({
@@ -32,17 +30,16 @@ class AuditClient {
         'Content-Type': 'application/json',
       },
     });
-    this.healthClient = new HttpClient(HEALTH_SERVICE_URL, 80, { useAuth: false });
   }
 
   /**
    * Health check do ms-audit
    */
-    async healthCheck(): Promise<void> {
+  async healthCheck(): Promise<void> {
     try {
-      await this.healthClient.get('/health');
+      await this.client.get('/health');
     } catch (error: any) {
-      throw new Error(`ms-contracts health check failed: ${error.message}`);
+      throw new Error(`ms-audit health check failed: ${error.message}`);
     }
   }
 
@@ -53,7 +50,7 @@ class AuditClient {
     try {
       console.log(`[VALIDACAO] Validando guia ${data.guiaId} no ms-audit...`);
       
-      const response = await this.client.post<ValidateGuiaResponse>('/audits/guias/validate', data);
+      const response = await this.client.post<ValidateGuiaResponse>(`/api/v1/procedures/validate-guia/${data.guiaId}`, data);
       
       const result = response.data;
       

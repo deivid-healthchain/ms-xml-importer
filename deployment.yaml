@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ms-xml-importer
+  labels:
+    app: ms-xml-importer
+spec:
+  replicas: 1 # Número de réplicas para alta disponibilidade
+  selector:
+    matchLabels:
+      app: ms-xml-importer
+  template:
+    metadata:
+      labels:
+        app: ms-xml-importer
+    spec:
+      containers:
+      - name: ms-xml-importer
+        image: lazarusacr.azurecr.io/ms-xml-importer:latest # Substitua pelo nome da sua imagem no ACR
+        ports:
+        - containerPort: 3010 # Porta exposta pelo microsserviço
+        env:
+        - name: PORT
+          value: "3010"
+        - name: NODE_ENV
+          value: "production"
+        - name: DATABASE_URL
+          value: "postgresql://lazarus:Yr6fhese@lazarus-sql.postgres.database.azure.com:5432/postgres?sslmode=require"
+        - name: MS_PATIENTS_URL
+          value: "http://48.192.39.147/patients/api/v1"
+        - name: MS_PATIENTS_HEALTH
+          value: "http://48.192.39.147/patients"
+        - name: MS_PROCEDURES_URL
+          value: "http://48.192.39.147/procedures/api/v1"
+        - name: MS_PROCEDURES_HEALTH
+          value: "http://48.192.39.147/procedures"
+        - name: MS_CONTRACTS_URL
+          value: "http://48.192.39.147/contracts/api"
+        - name: MS_BILLING_URL
+          value: "http://48.192.39.147/billing/api/v1"
+        - name: MS_AUDIT_URL
+          value: "http://48.192.39.147/audit"  
+        - name: API_KEY_HEADER
+          value: "X-Api-Key"
+        - name: API_KEY
+          value: "a7f3c8e9d2b1f4a6c5e8d9f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+        volumeMounts:
+        - name: uploads
+          mountPath: /app/uploads
+      volumes:
+      - name: uploads
+        emptyDir: {}
+
