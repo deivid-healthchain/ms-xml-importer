@@ -405,6 +405,67 @@ class Orchestrator {
               console.log(`  [OK] Procedimento conforme ao contrato`);
             }
 
+            // Salvar validações na tabela auditoria_validacoes
+            try {
+              // Buscar o procedimento local pelo código para pegar o ID
+              const procedimentoLocal = await prisma.guia_procedimentos.findFirst({
+                where: {
+                  guiaId: createdGuiaId!,
+                  codigoProcedimento: proc.codigoProcedimento
+                }
+              });
+
+              if (procedimentoLocal) {
+                // Salvar validação de valor contratual
+                if (validacao.valorContrato !== null) {
+                  const tipoValidacao = validacao.conforme ? 'VALOR_CONFORME' : 'VALOR_DIVERGENTE';
+                  const status = validacao.conforme ? 'CONFORME' : 'PENDENTE';
+                  
+                  await prisma.auditoria_validacoes.create({
+                    data: {
+                      id: `val_${createdGuiaId}_${procedimentoLocal.id}_valor_${Date.now()}`,
+                      guiaId: createdGuiaId!,
+                      procedimentoId: procedimentoLocal.id,
+                      tipoValidacao: tipoValidacao as any,
+                      status: status as any,
+                      mensagem: validacao.mensagem,
+                      valorEsperado: validacao.valorContrato,
+                      valorEncontrado: validacao.valorCobrado,
+                      diferenca: validacao.diferenca,
+                      fonteValor: validacao.valorContrato !== null ? 'CONTRATO' : null,
+                      metadata: {
+                        divergencias: validacao.divergencias,
+                        operadoraId: guiaData.operadoraId
+                      }
+                    }
+                  });
+                  console.log(`  [OK] Validação contratual salva para procedimento ${proc.codigoProcedimento}`);
+                }
+
+                // Salvar validação de fora do pacote se aplicável
+                const foraDoPacote = validacao.divergencias.find(d => d.tipo === 'NAO_CONTRATADO');
+                if (foraDoPacote) {
+                  await prisma.auditoria_validacoes.create({
+                    data: {
+                      id: `val_${createdGuiaId}_${procedimentoLocal.id}_pacote_${Date.now()}`,
+                      guiaId: createdGuiaId!,
+                      procedimentoId: procedimentoLocal.id,
+                      tipoValidacao: 'FORA_PACOTE' as any,
+                      status: 'PENDENTE' as any,
+                      mensagem: foraDoPacote.mensagem,
+                      metadata: {
+                        severidade: foraDoPacote.severidade
+                      }
+                    }
+                  });
+                  console.log(`  [OK] Validação de fora do pacote salva para procedimento ${proc.codigoProcedimento}`);
+                }
+              }
+            } catch (error: any) {
+              console.error(`  [ERRO] Erro ao salvar validações: ${error.message}`);
+              // Não bloqueia a importação
+            }
+
           } catch (error: any) {
             console.error(`  [ERRO] Erro ao validar contrato do procedimento ${proc.codigoProcedimento}:`, error.message);
             // Não bloqueia a importação, apenas registra o erro
