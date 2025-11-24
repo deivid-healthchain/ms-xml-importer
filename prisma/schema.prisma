@@ -696,3 +696,51 @@ enum SurgicalRole {
   TECHNICIAN
   RESIDENT
 }
+
+// Modelo de Validações de Auditoria
+model auditoria_validacoes {
+  id               String                @id @default(cuid())
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  guiaId           Int
+  procedimentoId   Int
+  tipoValidacao    TipoValidacao
+  status           StatusValidacao
+  mensagem         String?
+  valorEsperado    Decimal?              @db.Decimal(10, 2)
+  valorEncontrado  Decimal?              @db.Decimal(10, 2)
+  diferenca        Decimal?              @db.Decimal(10, 2)
+  metadata         Json?
+  auditorId        String?
+  dataValidacao    DateTime?
+  observacoes      String?
+  fonteValor       String?              @db.VarChar(20)
+
+  @@unique([guiaId, procedimentoId, tipoValidacao], name: "guiaId_procedimentoId_tipoValidacao")
+  @@index([guiaId])
+  @@index([procedimentoId])
+  @@index([status])
+  @@index([tipoValidacao])
+  @@map("auditoria_validacoes")
+}
+
+// Enums para Validações de Auditoria
+enum TipoValidacao {
+  VALOR
+  VALOR_CONFORME
+  VALOR_DIVERGENTE
+  FORA_PACOTE
+  PORTE
+  PACOTE
+  DUT
+  MATERIAL
+  DUPLICADO
+}
+
+enum StatusValidacao {
+  PENDENTE
+  CONFORME
+  DIVERGENTE
+  NAO_ENCONTRADO
+  ERRO
+}

@@ -408,7 +408,7 @@ class Orchestrator {
             // Salvar validações na tabela auditoria_validacoes
             try {
               // Buscar o procedimento local pelo código para pegar o ID
-              const procedimentoLocal = await prisma.guia_procedimentos.findFirst({
+              const procedimentoLocal = await prisma.procedimento.findFirst({
                 where: {
                   guiaId: createdGuiaId!,
                   codigoProcedimento: proc.codigoProcedimento
@@ -433,10 +433,10 @@ class Orchestrator {
                       valorEncontrado: validacao.valorCobrado,
                       diferenca: validacao.diferenca,
                       fonteValor: validacao.valorContrato !== null ? 'CONTRATO' : null,
-                      metadata: {
+                      metadata: JSON.parse(JSON.stringify({
                         divergencias: validacao.divergencias,
                         operadoraId: guiaData.operadoraId
-                      }
+                      }))
                     }
                   });
                   console.log(`  [OK] Validação contratual salva para procedimento ${proc.codigoProcedimento}`);
